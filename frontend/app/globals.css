@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+@theme {
+  --color-violet-primary: #7c3aed; /* Violet 600 */
+  --color-violet-light: #ddd6fe; /* Violet 200 */
+  --color-violet-ultralight: #f5f3ff; /* Violet 50 */
+  --color-violet-dark: #4c1d95; /* Violet 900 */
+  --color-white: #ffffff;
+  --color-danger: #ef4444; /* Red 500 */
+  --color-slate-100: #f1f5f9;
+  --color-slate-800: #1e293b;
+  
+  --font-body: 'Plus Jakarta Sans', sans-serif;
+  --font-display: 'Outfit', sans-serif;
+}
+
+@layer base {
+  body {
+    background: radial-gradient(circle at top right, var(--color-violet-light) 0%, var(--color-violet-ultralight) 50%, var(--color-white) 100%);
+    background-attachment: fixed;
+    color: var(--color-slate-800);
+    font-family: var(--font-body);
+  }
+}
+
+@layer utilities {
+  .glass-panel {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 10px 40px -10px rgba(124, 58, 237, 0.15);
+  }
+  
+  .glass-panel-violet {
+    background: rgba(124, 58, 237, 0.05);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(124, 58, 237, 0.2);
+  }
+
+  .pill-button {
+    border-radius: 9999px;
+    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+  }
+  
+  .pill-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 25px -5px rgba(124, 58, 237, 0.3);
+  }
+
+  .floating-element {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  .floating-element-delayed {
+    animation: float 6s ease-in-out infinite;
+    animation-delay: -3s;
+  }
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
