@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+// @ts-ignore
 import { FaceLandmarker, ObjectDetector, HandLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 import { CameraOff } from "lucide-react";
 
