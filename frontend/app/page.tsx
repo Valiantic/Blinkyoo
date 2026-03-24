@@ -141,6 +141,21 @@ export default function Home() {
     }
   }, [sessionState, gracePeriodSeconds]);
 
+  // Main Session Countdown Timer
+  useEffect(() => {
+    if (sessionState === "running") {
+      timerRef.current = setInterval(() => {
+        setSessionTimeLeft(prev => prev > 0 ? prev - 1 : 0);
+      }, 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [sessionState]);
+
   useEffect(() => {
     if (isAppDistracted) {
       addNotification(`You left your assigned focus app!`, "warning");

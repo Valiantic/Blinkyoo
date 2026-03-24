@@ -25,6 +25,8 @@ export default function CameraFocus({ isActive, onFaceMissing, onFaceFound, onPh
   
   const consecutiveMissingFrames = useRef<number>(0);
   const consecutivePhoneFrames = useRef<number>(0);
+  const wasPhoneDetected = useRef<boolean>(false);
+  const wasFaceMissing = useRef<boolean>(false);
   
   const lastVideoTime = useRef<number>(-1);
 
@@ -210,20 +212,34 @@ export default function CameraFocus({ isActive, onFaceMissing, onFaceFound, onPh
         }
       }
 
-      // Handle continuous states
+      // Handle continuous states with debounce/stability
       if (faceMissingThisFrame) {
         consecutiveMissingFrames.current++;
-        if (consecutiveMissingFrames.current > 30) onFaceMissing();
+        if (consecutiveMissingFrames.current > 30 && !wasFaceMissing.current) {
+          onFaceMissing();
+          wasFaceMissing.current = true;
+        }
       } else {
-        if (consecutiveMissingFrames.current > 30) onFaceFound();
+        if (wasFaceMissing.current) {
+          onFaceFound();
+          wasFaceMissing.current = false;
+        }
         consecutiveMissingFrames.current = 0;
       }
       
       if (phoneDetectedThisFrame) {
         consecutivePhoneFrames.current++;
-        if (consecutivePhoneFrames.current > 15) onPhoneDetected();
+        if (consecutivePhoneFrames.current > 15 && !wasPhoneDetected.current) {
+          onPhoneDetected();
+          wasPhoneDetected.current = true;
+        }
       } else {
-        if (consecutivePhoneFrames.current > 15) onPhoneCleared();
+        // More robust clearing: if we don't see it for even a few frames, clear it
+        if (wasPhoneDetected.current) {
+          consecutivePhoneFrames.current = 0; // reset counter while clear
+          onPhoneCleared();
+          wasPhoneDetected.current = false;
+        }
         consecutivePhoneFrames.current = 0;
       }
     }
