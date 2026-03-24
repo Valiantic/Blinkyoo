@@ -17,6 +17,9 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: "Blinkyoo",
   description: "Sensory focus awareness through intelligent tracking.",
+  icons: {
+    icon: "/logo.png",
+  },
 };
 
 export default function RootLayout({

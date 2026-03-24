@@ -97,12 +97,6 @@ export default function Home() {
   };
 
   // Register SW for background background notifications
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => { });
-    }
-  }, []);
-
   // Tab switching detector
   useEffect(() => {
     if (sessionState === "running") {
@@ -454,14 +448,14 @@ export default function Home() {
                 </p>
               </div>
 
-              <div className="flex gap-4 mb-16 flex-wrap justify-center bg-white/40 p-2 rounded-full border border-white/60 shadow-inner">
+              <div className="flex gap-2 mb-12 flex-wrap justify-center bg-white/40 p-1.5 rounded-full border border-white/60 shadow-inner scale-90 md:scale-100">
                 {[10, 25, 50, 90].map(mins => (
                   <button
                     key={mins}
                     onClick={() => setSessionDurationMinutes(mins)}
-                    className={`py-3 px-6 md:py-4 md:px-8 text-lg font-semibold rounded-full transition-all ${sessionDurationMinutes === mins ? 'bg-white text-violet-700 shadow-md' : 'text-violet-500 hover:bg-white/60'}`}
+                    className={`py-2 px-5 md:py-2.5 md:px-6 text-sm font-bold rounded-full transition-all ${sessionDurationMinutes === mins ? 'bg-white text-violet-700 shadow-sm' : 'text-violet-500/70 hover:bg-white/60'}`}
                   >
-                    {mins} min
+                    {mins}m
                   </button>
                 ))}
               </div>
@@ -579,9 +573,17 @@ export default function Home() {
               }}
             />
           ) : (
-            <div className="text-center text-violet-300 flex flex-col items-center p-8 bg-violet-50/30 rounded-2xl w-full h-[calc(100%-2rem)] justify-center border border-dashed border-violet-200">
-              <Monitor size={56} className="mb-4 opacity-50" />
-              <span className="font-semibold text-sm">CAMERA IDLE</span>
+            <div className="text-center flex flex-col items-center p-12 bg-violet-50/30 rounded-3xl w-full h-[calc(100%-2rem)] justify-center border border-dashed border-violet-200 relative overflow-hidden group">
+              <div className="absolute inset-0 bg-violet-100/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              <motion.img 
+                src="/logo.png" 
+                alt="Blinkyoo Logo" 
+                className="w-32 h-32 md:w-48 md:h-48 object-contain opacity-40 grayscale-[0.5] contrast-[0.8] mb-6 select-none pointer-events-none"
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 0.4 }}
+                transition={{ duration: 1.5, repeat: Infinity, repeatType: 'reverse' }}
+              />
+              <span className="font-bold text-[10px] tracking-[0.2em] text-violet-400/60 uppercase">System Ready</span>
             </div>
           )}
         </div>
