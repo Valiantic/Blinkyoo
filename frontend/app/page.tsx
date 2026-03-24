@@ -3,10 +3,10 @@
 import { useEffect, useState, useRef } from "react";
 import CameraFocus from "../components/CameraFocus";
 import { evaluateSession } from "../lib/api";
-import { Play, Square, AlertTriangle, Monitor, X, Activity, Smartphone, EyeOff, LayoutTemplate } from "lucide-react";
+import { Play, Square, AlertTriangle, Monitor, X, Activity, Smartphone, EyeOff, LayoutTemplate, Pause } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-type SessionState = "idle" | "running" | "ended";
+type SessionState = "idle" | "running" | "paused" | "ended";
 
 export default function Home() {
   const [sessionState, setSessionState] = useState<SessionState>("idle");
@@ -50,7 +50,7 @@ export default function Home() {
       oscillator.start();
       oscillator.stop(audioCtx.currentTime + 0.3);
     } catch (err) {
-      console.error(err);
+      // Audio not supported
     }
   };
 
@@ -65,23 +65,31 @@ export default function Home() {
 
     if (typeof window !== 'undefined' && "Notification" in window) {
       if (Notification.permission === 'granted') {
+        const options: any = {
+          body: text,
+          tag: 'blinkyoo-focus-alert',
+          renotify: true,
+          icon: '/window.svg',
+          vibrate: [200, 100, 200],
+          silent: false,
+          requireInteraction: true
+        };
+
         if ('serviceWorker' in navigator) {
           navigator.serviceWorker.ready.then(reg => {
-            reg.showNotification("blinkyoo", { body: text });
+            reg.showNotification("Blinkyoo Alert", options);
           }).catch(() => {
-            const n = new Notification("blinkyoo", { body: text });
+            const n = new Notification("Blinkyoo Alert", options);
             n.onclick = () => { window.focus(); n.close(); };
           });
         } else {
-          const n = new Notification("blinkyoo", { body: text });
+          const n = new Notification("Blinkyoo Alert", options);
           n.onclick = () => { window.focus(); n.close(); };
         }
       } else if (Notification.permission !== 'denied') {
         Notification.requestPermission().then(permission => {
-          if (permission === 'granted' && 'serviceWorker' in navigator) {
-            navigator.serviceWorker.ready.then(reg => {
-              reg.showNotification("blinkyoo", { body: text });
-            });
+          if (permission === 'granted') {
+            addNotification(text, type); // Retry once after permission
           }
         });
       }
@@ -104,12 +112,11 @@ export default function Home() {
       };
 
       const handleVisibilityChange = () => {
-        // Only enforce strict tab lockdown if the user is not using the Native App Tracker
-        if (document.hidden && targetWebsites.length === 0) {
+        // Only enforce tab switches for local browser mode (no targets).
+        // If they have targets, the polling loop below handles the OS-wide distraction counting.
+        if (document.hidden && targetWebsites.length === 0 && sessionState === "running") {
           setTabSwitches(prev => prev + 1);
-          setTimeout(() => {
-            addNotification("Focus lost from tab. Please return immediately.", "warning");
-          }, 150);
+          addNotification("Focus lost from tab. Please return immediately.", "warning");
         }
       };
 
@@ -129,8 +136,8 @@ export default function Home() {
       timerRef.current = setInterval(() => {
         setSessionTimeLeft(prev => prev > 0 ? prev - 1 : 0);
       }, 1000);
-    } else if (timerRef.current) {
-      clearInterval(timerRef.current);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
     }
 
     return () => {
@@ -168,39 +175,44 @@ export default function Home() {
             const activeTitle = data.title.toLowerCase();
 
             const isMatched = targetWebsites.some(target => {
-              // 1. Strip URLs and symbols to bare keyword tokens
-              let cleanTarget = target.toLowerCase()
-                .replace(/https?:\/\//g, ' ')
-                .replace(/www\./g, ' ')
-                .replace(/\.com|\.org|\.net|\.io|\.co/g, ' ')
-                .replace(/[\/\-_:]/g, ' ');
+              if (!target || target.trim() === "") return false;
+
+              let keywords: string[] = [];
+
+              if (target.includes('.') || target.includes('/') || target.includes(':')) {
+                try {
+                  const urlStr = target.startsWith('http') ? target : `http://${target}`;
+                  const url = new URL(urlStr);
+                  const domainParts = url.hostname.split('.');
+                  keywords = domainParts.filter(p => !['com', 'edu', 'gov', 'net', 'org', 'www', 'io', 'co', 'app'].includes(p.toLowerCase()));
+                  const pathParts = url.pathname.split('/').filter(p => p.length > 3);
+                  keywords = [...keywords, ...pathParts];
+                } catch (e) {
+                  keywords = target.toLowerCase().split(/[\/.:\-_]+/).filter(w => w.length >= 2);
+                }
+              } else {
+                keywords = target.toLowerCase().split(/[\s\-_]+/).filter(w => w.length >= 2);
+              }
 
               const stopWords = ['app', 'tab', 'window', 'browser', 'website', 'the', 'my', 'a'];
-              const genericBrowsers = ['chrome', 'edge', 'safari', 'firefox', 'brave', 'opera', 'google'];
+              const filteredKeywords = keywords.filter(k => !stopWords.includes(k.toLowerCase()));
 
-              const targetWords = cleanTarget.split(/(?: - | )+/)
-                .map(w => w.trim())
-                .filter(w => w !== '' && !stopWords.includes(w) && !genericBrowsers.includes(w));
+              if (filteredKeywords.length === 0) return false;
 
-              if (targetWords.length === 0) {
-                const fallbackWords = target.toLowerCase().split(/(?: - | )+/).map(w => w.trim()).filter(w => w !== '');
-                if (fallbackWords.length === 0) return true;
-                return fallbackWords.every(word => activeTitle.includes(word));
-              }
-
-              // If it was a URL string, the first unique word is the root domain name (e.g. facebook from facebook.com)
-              if (target.includes('.') || target.includes('/')) {
-                return activeTitle.includes(targetWords[0]);
-              }
-
-              return targetWords.every(word => activeTitle.includes(word));
+              // Use 'every' to ensure all target keywords are in the title (better precision)
+              return filteredKeywords.every(keyword => activeTitle.includes(keyword.toLowerCase()));
             });
 
-            const ignoreWindows = ["task switching", "program manager", "search", "start", "windows default lock screen", "new tab", "new tab - google chrome", "new tab - personal - microsoft​ edge"];
+            const ignoreWindowsExact = ["task switching", "program manager", "search", "start", "workspace", "desktop", "task view"];
+            const ignoreWindowsPartial = ["windows default lock screen", "new tab - google chrome", "new tab - microsoft​ edge"];
 
-            if (activeTitle && !ignoreWindows.includes(activeTitle.trim()) && !isMatched && !activeTitle.includes("blinkyoo")) {
+            const isIgnored = ignoreWindowsExact.includes(activeTitle.trim()) ||
+              ignoreWindowsPartial.some(ignore => activeTitle.includes(ignore));
+
+            if (activeTitle && !isIgnored && !isMatched && !activeTitle.includes("blinkyoo")) {
               distractionPingsRef.current += 1;
-              if (distractionPingsRef.current >= 2) {
+              if (distractionPingsRef.current >= 2) { // 2 pings = 3 seconds buffer
+                if (!isAppDistracted) setTabSwitches(prev => prev + 1);
                 setIsAppDistracted(true);
               }
             } else {
@@ -209,7 +221,7 @@ export default function Home() {
             }
           }
         } catch (e) { }
-      }, 2000);
+      }, 1500);
     } else {
       distractionPingsRef.current = 0;
       setIsAppDistracted(false);
@@ -236,8 +248,8 @@ export default function Home() {
       penaltyTimerRef.current = setInterval(() => {
         setAwaySeconds(prev => prev + 1);
       }, 1000);
-    } else if (penaltyTimerRef.current) {
-      clearInterval(penaltyTimerRef.current);
+    } else {
+      if (penaltyTimerRef.current) clearInterval(penaltyTimerRef.current);
     }
     return () => {
       if (penaltyTimerRef.current) clearInterval(penaltyTimerRef.current);
@@ -303,8 +315,8 @@ export default function Home() {
               animate={{ x: 0, opacity: 1, scale: 1 }}
               exit={{ x: 100, opacity: 0, scale: 0.9 }}
               className={`p-4 min-w-[320px] rounded-2xl glass-panel shadow-xl flex gap-3 text-sm font-medium ${n.type === 'warning' ? 'bg-orange-50/90 text-orange-600 border border-orange-200' :
-                  n.type === 'danger' ? 'bg-red-50/90 text-red-600 border border-red-200' :
-                    'bg-violet-50/90 text-violet-700 border border-violet-200'
+                n.type === 'danger' ? 'bg-red-50/90 text-red-600 border border-red-200' :
+                  'bg-violet-50/90 text-violet-700 border border-violet-200'
                 }`}
             >
               {n.type === 'danger' ? <Smartphone size={20} /> : n.type === 'warning' ? <AlertTriangle size={20} /> : <Activity size={20} />}
@@ -365,13 +377,42 @@ export default function Home() {
                 </div>
               </div>
 
-              <button
-                onClick={handleEndSession}
-                className="mt-8 hover:bg-violet-50 border-2 border-violet-200 text-violet-600 font-bold py-4 px-12 rounded-full text-lg shadow-sm transition-all flex gap-3 items-center"
-              >
-                <Square size={20} fill="currentColor" /> Finish early
-              </button>
+              <div className="flex gap-4 mt-8">
+                <button
+                  onClick={() => setSessionState(sessionState === "running" ? "paused" : "running")}
+                  className={`hover:bg-violet-50 border-2 border-violet-200 text-violet-600 font-bold py-4 px-10 rounded-full text-lg shadow-sm transition-all flex gap-3 items-center`}
+                >
+                  <Pause size={20} fill="currentColor" /> Pause session
+                </button>
+                <button
+                  onClick={handleEndSession}
+                  className="hover:bg-red-50 border-2 border-red-200 text-red-600 font-bold py-4 px-10 rounded-full text-lg shadow-sm transition-all flex gap-3 items-center"
+                >
+                  <Square size={20} fill="currentColor" /> Finish early
+                </button>
+              </div>
             </>
+          ) : sessionState === "paused" ? (
+            <div className="flex flex-col items-center animate-pulse">
+              <h1 className="text-7xl md:text-[12rem] leading-none font-[var(--font-display)] font-light text-violet-300 transition-colors drop-shadow-sm mb-4">
+                PAUSED
+              </h1>
+              <p className="text-violet-400 font-bold tracking-widest text-sm uppercase mb-10">All tracking mechanisms suspended</p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setSessionState("running")}
+                  className="bg-violet-600 hover:bg-violet-700 text-white font-bold py-5 px-14 rounded-full text-xl transition-all flex gap-3 items-center shadow-xl shadow-violet-200"
+                >
+                  <Play size={24} fill="currentColor" /> Resume session
+                </button>
+                <button
+                  onClick={handleEndSession}
+                  className="border-2 border-red-200 text-red-500 hover:bg-red-50 font-bold py-5 px-10 rounded-full text-lg transition-all flex gap-3 items-center"
+                >
+                  <Square size={20} fill="currentColor" /> Finish session
+                </button>
+              </div>
+            </div>
           ) : sessionState === "ended" ? (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full text-center flex flex-col justify-center flex-1 max-w-3xl">
 
@@ -406,7 +447,7 @@ export default function Home() {
             <div className="w-full text-center flex flex-col items-center justify-center py-10 flex-1">
               <div className="mb-14">
                 <h1 className="text-6xl md:text-[6rem] font-[var(--font-display)] text-transparent bg-clip-text bg-gradient-to-br from-violet-600 to-indigo-500 font-bold tracking-tight mb-4 drop-shadow-sm">
-                  blinkyoo
+                  Blinkyoo
                 </h1>
                 <p className="text-violet-500/80 font-medium tracking-widest text-sm uppercase">
                   Uninterrupted focus. No history tracked.
@@ -459,13 +500,15 @@ export default function Home() {
                 </div>
 
                 <datalist id="window-titles">
-                  {availableWindows.filter(w => w.trim() !== "").map(w => <option key={w} value={w} />)}
+                  {availableWindows
+                    .filter(w => w && w.trim() !== "")
+                    .map((w, i) => <option key={`${w}-${i}`} value={w} />)}
                 </datalist>
 
                 {targetWebsites.length > 0 && (
                   <div className="flex flex-wrap gap-2 w-full mt-2 justify-center">
-                    {targetWebsites.map(target => (
-                      <div key={target} className="bg-violet-200/50 backdrop-blur-sm text-violet-700 border border-violet-300/50 text-xs font-bold px-4 py-2 rounded-full flex items-center gap-2 shadow-sm animate-fade-in">
+                    {targetWebsites.map((target, i) => (
+                      <div key={`${target}-${i}`} className="bg-violet-200/50 backdrop-blur-sm text-violet-700 border border-violet-300/50 text-xs font-bold px-4 py-2 rounded-full flex items-center gap-2 shadow-sm animate-fade-in">
                         <span className="max-w-[200px] truncate">{target}</span>
                         <button onClick={() => setTargetWebsites(targetWebsites.filter(t => t !== target))} className="hover:text-red-500 hover:bg-white/50 rounded-full p-0.5 transition-all">
                           <X size={14} />
@@ -478,9 +521,24 @@ export default function Home() {
                 <div className="text-[10px] text-violet-400 font-semibold px-4 text-center mt-2 leading-relaxed">Select from active windows or type a keyword. Add as many tabs/apps as you want!</div>
               </div>
 
+              {/* Requirement Reminder for Chrome Users */}
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-4 p-4 rounded-2xl bg-violet-50/50 border border-violet-100/50 max-w-sm flex items-center gap-4 text-left shadow-sm"
+              >
+                <div className="p-2 bg-white rounded-xl shadow-sm">
+                   <Activity className="text-violet-500" size={18} />
+                </div>
+                <div>
+                   <p className="text-[11px] font-bold text-violet-600 uppercase tracking-widest mb-1">System Requirement</p>
+                   <p className="text-[11px] text-violet-500/80 leading-snug">Ensure **Notifications** are enabled in your browser settings for real-time OS alerts to work properly.</p>
+                </div>
+              </motion.div>
+
               <button
                 onClick={handleStartSession}
-                className="bg-violet-600 hover:bg-violet-700 text-white font-bold py-5 px-14 rounded-full text-2xl pill-button transition-all flex gap-3 items-center shadow-xl shadow-violet-200"
+                className="mt-10 bg-violet-600 hover:bg-violet-700 text-white font-bold py-5 px-14 rounded-full text-2xl pill-button transition-all flex gap-3 items-center shadow-xl shadow-violet-200"
               >
                 <Play size={24} fill="currentColor" /> Begin Focus
               </button>
