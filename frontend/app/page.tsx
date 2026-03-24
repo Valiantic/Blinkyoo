@@ -20,7 +20,9 @@ export default function Home() {
 
   const [targetWebsites, setTargetWebsites] = useState<string[]>([]);
   const [isAppDistracted, setIsAppDistracted] = useState(false);
+  const [gracePeriodSeconds, setGracePeriodSeconds] = useState(30);
   const distractionPingsRef = useRef(0);
+  const graceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [currentFeedback, setCurrentFeedback] = useState<string | null>(null);
 
@@ -104,11 +106,25 @@ export default function Home() {
 
       const handleVisibilityChange = () => {
         if (document.hidden && sessionState === "running") {
-          distractionPingsRef.current += 1;
-          setTabSwitches(prev => prev + 1);
-          setIsAppDistracted(true);
-          addNotification("You left your focus session. Stay on task!", "warning");
+          if (gracePeriodSeconds === 0) {
+            // Strict mode: flag immediately
+            setTabSwitches(prev => prev + 1);
+            setIsAppDistracted(true);
+            addNotification("You left your focus session. Stay on task!", "warning");
+          } else {
+            // Grace period: start countdown before flagging
+            if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
+            graceTimerRef.current = setTimeout(() => {
+              if (document.hidden) { // Still away? Flag it.
+                setTabSwitches(prev => prev + 1);
+                setIsAppDistracted(true);
+                addNotification(`You've been away for ${gracePeriodSeconds}s. Return to focus!`, "warning");
+              }
+            }, gracePeriodSeconds * 1000);
+          }
         } else if (!document.hidden) {
+          // Returned — cancel any pending grace timer
+          if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
           distractionPingsRef.current = 0;
           setIsAppDistracted(false);
         }
@@ -120,9 +136,10 @@ export default function Home() {
       return () => {
         window.removeEventListener('beforeunload', handleBeforeUnload);
         document.removeEventListener('visibilitychange', handleVisibilityChange);
+        if (graceTimerRef.current) clearTimeout(graceTimerRef.current);
       };
     }
-  }, [sessionState]);
+  }, [sessionState, gracePeriodSeconds]);
 
   useEffect(() => {
     if (isAppDistracted) {
@@ -361,13 +378,30 @@ export default function Home() {
                 ))}
               </div>
 
-              <div className="flex flex-col items-center justify-center gap-3 w-full max-w-[28rem] mx-auto mb-10">
-                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
-                  className="flex items-center gap-2 text-violet-600 font-bold tracking-widest text-[10px] uppercase text-center bg-violet-50 px-4 py-2 rounded-full shadow-sm border border-violet-200"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse inline-block"></span>
-                  Tab-Lock Active — Any Tab Switch Will Be Flagged
-                </motion.div>
+              <div className="flex flex-col items-center justify-center gap-4 w-full max-w-[28rem] mx-auto mb-10">
+                {/* Grace Period Selector */}
+                <p className="text-[10px] font-bold text-violet-500 uppercase tracking-widest">Tab Grace Period</p>
+                <div className="flex gap-2 flex-wrap justify-center bg-white/40 p-1.5 rounded-full border border-white/60 shadow-inner">
+                  {[{ label: 'Strict', val: 0 }, { label: '15s', val: 15 }, { label: '30s', val: 30 }, { label: '60s', val: 60 }].map(opt => (
+                    <button
+                      key={opt.val}
+                      onClick={() => setGracePeriodSeconds(opt.val)}
+                      className={`py-2 px-5 text-sm font-bold rounded-full transition-all ${
+                        gracePeriodSeconds === opt.val
+                          ? opt.val === 0 ? 'bg-red-500 text-white shadow-sm' : 'bg-white text-violet-700 shadow-sm'
+                          : 'text-violet-500/70 hover:bg-white/60'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[10px] text-violet-400 font-medium">
+                  {gracePeriodSeconds === 0
+                    ? '⚠️ Any tab switch is instantly flagged'
+                    : `You have ${gracePeriodSeconds}s to switch tabs and return before being flagged`
+                  }
+                </p>
               </div>
 
 
