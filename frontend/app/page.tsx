@@ -19,9 +19,7 @@ export default function Home() {
   const [isPhoneDetected, setIsPhoneDetected] = useState(false);
 
   const [targetWebsites, setTargetWebsites] = useState<string[]>([]);
-  const [currentInput, setCurrentInput] = useState("");
   const [isAppDistracted, setIsAppDistracted] = useState(false);
-  const [availableWindows, setAvailableWindows] = useState<string[]>([]);
   const distractionPingsRef = useRef(0);
 
   const [currentFeedback, setCurrentFeedback] = useState<string | null>(null);
@@ -96,8 +94,7 @@ export default function Home() {
     }
   };
 
-  // Register SW for background background notifications
-  // Tab switching detector
+  // Tab switching & app distraction detector (works everywhere via Page Visibility API)
   useEffect(() => {
     if (sessionState === "running") {
       const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -106,11 +103,14 @@ export default function Home() {
       };
 
       const handleVisibilityChange = () => {
-        // Only enforce tab switches for local browser mode (no targets).
-        // If they have targets, the polling loop below handles the OS-wide distraction counting.
-        if (document.hidden && targetWebsites.length === 0 && sessionState === "running") {
+        if (document.hidden && sessionState === "running") {
+          distractionPingsRef.current += 1;
           setTabSwitches(prev => prev + 1);
-          addNotification("Focus lost from tab. Please return immediately.", "warning");
+          setIsAppDistracted(true);
+          addNotification("You left your focus session. Stay on task!", "warning");
+        } else if (!document.hidden) {
+          distractionPingsRef.current = 0;
+          setIsAppDistracted(false);
         }
       };
 
@@ -122,106 +122,7 @@ export default function Home() {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       };
     }
-  }, [sessionState, targetWebsites]);
-
-  // Main Session Countdown Timer
-  useEffect(() => {
-    if (sessionState === "running") {
-      timerRef.current = setInterval(() => {
-        setSessionTimeLeft(prev => prev > 0 ? prev - 1 : 0);
-      }, 1000);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-    }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
   }, [sessionState]);
-
-  // Fetch visible windows list
-  useEffect(() => {
-    if (sessionState === "idle") {
-      const fetchWindows = async () => {
-        try {
-          const res = await fetch("http://localhost:8000/windows");
-          if (res.ok) {
-            const data = await res.json();
-            if (data.windows) setAvailableWindows(data.windows);
-          }
-        } catch (e) { }
-      };
-      fetchWindows();
-      const interval = setInterval(fetchWindows, 3000);
-      return () => clearInterval(interval);
-    }
-  }, [sessionState]);
-
-  // Native App Window Polling
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (sessionState === "running" && targetWebsites.length > 0) {
-      interval = setInterval(async () => {
-        try {
-          const res = await fetch("http://localhost:8000/active-window");
-          if (res.ok) {
-            const data = await res.json();
-            const activeTitle = data.title.toLowerCase();
-
-            const isMatched = targetWebsites.some(target => {
-              if (!target || target.trim() === "") return false;
-
-              let keywords: string[] = [];
-
-              if (target.includes('.') || target.includes('/') || target.includes(':')) {
-                try {
-                  const urlStr = target.startsWith('http') ? target : `http://${target}`;
-                  const url = new URL(urlStr);
-                  const domainParts = url.hostname.split('.');
-                  keywords = domainParts.filter(p => !['com', 'edu', 'gov', 'net', 'org', 'www', 'io', 'co', 'app'].includes(p.toLowerCase()));
-                  const pathParts = url.pathname.split('/').filter(p => p.length > 3);
-                  keywords = [...keywords, ...pathParts];
-                } catch (e) {
-                  keywords = target.toLowerCase().split(/[\/.:\-_]+/).filter(w => w.length >= 2);
-                }
-              } else {
-                keywords = target.toLowerCase().split(/[\s\-_]+/).filter(w => w.length >= 2);
-              }
-
-              const stopWords = ['app', 'tab', 'window', 'browser', 'website', 'the', 'my', 'a'];
-              const filteredKeywords = keywords.filter(k => !stopWords.includes(k.toLowerCase()));
-
-              if (filteredKeywords.length === 0) return false;
-
-              // Use 'every' to ensure all target keywords are in the title (better precision)
-              return filteredKeywords.every(keyword => activeTitle.includes(keyword.toLowerCase()));
-            });
-
-            const ignoreWindowsExact = ["task switching", "program manager", "search", "start", "workspace", "desktop", "task view"];
-            const ignoreWindowsPartial = ["windows default lock screen", "new tab - google chrome", "new tab - microsoft​ edge"];
-
-            const isIgnored = ignoreWindowsExact.includes(activeTitle.trim()) ||
-              ignoreWindowsPartial.some(ignore => activeTitle.includes(ignore));
-
-            if (activeTitle && !isIgnored && !isMatched && !activeTitle.includes("blinkyoo")) {
-              distractionPingsRef.current += 1;
-              if (distractionPingsRef.current >= 2) { // 2 pings = 3 seconds buffer
-                if (!isAppDistracted) setTabSwitches(prev => prev + 1);
-                setIsAppDistracted(true);
-              }
-            } else {
-              distractionPingsRef.current = 0;
-              setIsAppDistracted(false);
-            }
-          }
-        } catch (e) { }
-      }, 1500);
-    } else {
-      distractionPingsRef.current = 0;
-      setIsAppDistracted(false);
-    }
-    return () => clearInterval(interval);
-  }, [sessionState, targetWebsites]);
 
   useEffect(() => {
     if (isAppDistracted) {
@@ -461,72 +362,28 @@ export default function Home() {
               </div>
 
               <div className="flex flex-col items-center justify-center gap-3 w-full max-w-[28rem] mx-auto mb-10">
-                <p className="text-violet-500/80 font-bold tracking-widest text-[10px] uppercase text-center bg-violet-100 px-4 py-2 rounded-full shadow-sm border border-violet-200">Native OS Screen Tracking</p>
-
-                <div className="flex gap-2 w-full mt-2">
-                  <input
-                    type="text"
-                    value={currentInput}
-                    onChange={(e) => setCurrentInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        if (currentInput.trim() && !targetWebsites.includes(currentInput.trim())) {
-                          setTargetWebsites([...targetWebsites, currentInput.trim()]);
-                          setCurrentInput("");
-                        }
-                      }
-                    }}
-                    list="window-titles"
-                    placeholder="Add allowed app or tab..."
-                    className="w-full bg-white/40 border-2 border-white/60 focus:border-violet-300 focus:bg-white text-violet-700 placeholder-violet-300/60 rounded-xl px-5 py-3 outline-none font-medium shadow-inner transition-all sm:text-sm text-center"
-                  />
-                  <button
-                    onClick={() => {
-                      if (currentInput.trim() && !targetWebsites.includes(currentInput.trim())) {
-                        setTargetWebsites([...targetWebsites, currentInput.trim()]);
-                        setCurrentInput("");
-                      }
-                    }}
-                    className="bg-violet-600 hover:bg-violet-700 text-white font-bold px-6 py-3 rounded-xl transition-all shadow-md active:scale-95"
-                  >
-                    Add
-                  </button>
-                </div>
-
-                <datalist id="window-titles">
-                  {availableWindows
-                    .filter(w => w && w.trim() !== "")
-                    .map((w, i) => <option key={`${w}-${i}`} value={w} />)}
-                </datalist>
-
-                {targetWebsites.length > 0 && (
-                  <div className="flex flex-wrap gap-2 w-full mt-2 justify-center">
-                    {targetWebsites.map((target, i) => (
-                      <div key={`${target}-${i}`} className="bg-violet-200/50 backdrop-blur-sm text-violet-700 border border-violet-300/50 text-xs font-bold px-4 py-2 rounded-full flex items-center gap-2 shadow-sm animate-fade-in">
-                        <span className="max-w-[200px] truncate">{target}</span>
-                        <button onClick={() => setTargetWebsites(targetWebsites.filter(t => t !== target))} className="hover:text-red-500 hover:bg-white/50 rounded-full p-0.5 transition-all">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="text-[10px] text-violet-400 font-semibold px-4 text-center mt-2 leading-relaxed">Select from active windows or type a keyword. Add as many tabs/apps as you want!</div>
+                <motion.div initial={{ opacity: 0, y: -5 }} animate={{ opacity: 1, y: 0 }}
+                  className="flex items-center gap-2 text-violet-600 font-bold tracking-widest text-[10px] uppercase text-center bg-violet-50 px-4 py-2 rounded-full shadow-sm border border-violet-200"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse inline-block"></span>
+                  Tab-Lock Active — Any Tab Switch Will Be Flagged
+                </motion.div>
               </div>
 
-              {/* Requirement Reminder for Chrome Users */}
-              <motion.div 
+
+
+              {/* Notification Reminder */}
+              <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 p-4 rounded-2xl bg-violet-50/50 border border-violet-100/50 max-w-sm flex items-center gap-4 text-left shadow-sm"
+                className="mt-2 p-4 rounded-2xl bg-violet-50/50 border border-violet-100/50 max-w-sm flex items-center gap-4 text-left shadow-sm"
               >
                 <div className="p-2 bg-white rounded-xl shadow-sm">
-                   <Activity className="text-violet-500" size={18} />
+                  <Activity className="text-violet-500" size={18} />
                 </div>
                 <div>
-                   <p className="text-[11px] font-bold text-violet-600 uppercase tracking-widest mb-1">System Requirement</p>
-                   <p className="text-[11px] text-violet-500/80 leading-snug">Ensure **Notifications** are enabled in your browser settings for real-time OS alerts to work properly.</p>
+                  <p className="text-[11px] font-bold text-violet-600 uppercase tracking-widest mb-1">Browser Notifications Required</p>
+                  <p className="text-[11px] text-violet-500/80 leading-snug">Enable notifications in your browser settings for real-time alerts to appear on your desktop.</p>
                 </div>
               </motion.div>
 
